@@ -44,6 +44,38 @@ class WebviewWindow {
                      bool openMaximized, bool openHidden,
                      bool denyCameraAndMicrophone, CreateCallback callback);
 
+  // Opt-in window behaviour, set before CreateAndShow. All default off, so a
+  // caller that does not ask gets the original behaviour.
+  struct WindowOptions {
+    // X (WM_CLOSE) hides the window instead of destroying it, and reports
+    // "onWindowCloseRequested" plus the placement.
+    bool hide_on_close = false;
+    // Report "onWindowPlacementChanged" when a move/resize ends.
+    bool report_placement = false;
+    bool always_on_top = false;
+    // When non-empty, a checkable item with this label is added to the
+    // system menu; toggling it sets always-on-top and reports
+    // "onAlwaysOnTopChanged".
+    std::wstring always_on_top_menu_label;
+    // Restore placement saved from a previous "getWindowPlacement" /
+    // "onWindowPlacementChanged" (physical pixels at |placement_dpi|).
+    bool has_placement = false;
+    RECT placement_normal_rect{};
+    UINT placement_dpi = 96;
+  };
+
+  void SetWindowOptions(WindowOptions options) { options_ = std::move(options); }
+
+  // Shows without activating when |activate| is false, so the window does not
+  // take focus from the app's main window.
+  void setVisibility(bool visible, bool activate);
+
+  void SetAlwaysOnTop(bool on_top);
+
+  void SetMemoryUsageTargetLow(bool low);
+
+  [[nodiscard]] flutter::EncodableMap GetWindowPlacementMap() const;
+
 
   // OS callback called by message pump. Handles the WM_NCCREATE message which
   // is passed when the non-client area is being created and enables automatic
@@ -91,6 +123,20 @@ class WebviewWindow {
   bool destroyed_ = false;
 
   int title_bar_height_;
+
+  WindowOptions options_;
+
+  bool always_on_top_ = false;
+
+  // Set while CreateAndShow applies a saved placement, so the WM_DPICHANGED
+  // it may trigger does not rescale a rect that is already in target pixels.
+  bool applying_placement_ = false;
+
+  void ApplySavedPlacement();
+
+  void InstallAlwaysOnTopMenuItem();
+
+  void ReportPlacement(const char *reason);
 
   // Processes and route salient window messages for mouse handling,
   // size change and DPI. Delegates handling of these to member overloads that

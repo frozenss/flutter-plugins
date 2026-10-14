@@ -71,6 +71,9 @@ class WebView {
   // window is shown unless it is told.
   void SetVisible(bool visible);
 
+  // ICoreWebView2_19::MemoryUsageTargetLevel; a no-op on runtimes without it.
+  void SetMemoryUsageTargetLow(bool low);
+
  private:
   wil::unique_hwnd view_window_;
 

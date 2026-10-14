@@ -1,3 +1,7 @@
+## Unreleased
+
+* Windows: opt-in `hideOnClose` (X hides instead of destroying, `setOnCloseRequestedCallback`), `reportWindowPlacement` (`setOnWindowPlacementChangedCallback` on move/resize end and X), `windowPlacement` restore with DPI correction, `alwaysOnTop` / `setAlwaysOnTop` and a checkable `alwaysOnTopSystemMenuLabel` system menu item (`setOnAlwaysOnTopChangedCallback`), `setWebviewWindowVisibility(activate: false)`, `setMemoryUsageTargetLow` and `getWindowPlacement`.
+
 ## 0.3.1
 
 * Add Windows `openHidden` and `denyCameraAndMicrophone` options, and fix blank pages when approving navigation requests [#508](https://github.com/MixinNetwork/flutter-plugins/pull/508)

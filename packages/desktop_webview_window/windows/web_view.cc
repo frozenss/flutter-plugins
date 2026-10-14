@@ -412,6 +412,15 @@ void WebView::SetVisible(bool visible) {
   }
 }
 
+void WebView::SetMemoryUsageTargetLow(bool low) {
+  if (!webview_) return;
+  auto webview19 = webview_.try_query<ICoreWebView2_19>();
+  if (!webview19) return;
+  webview19->put_MemoryUsageTargetLevel(
+      low ? COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+          : COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL);
+}
+
 void WebView::CancelPendingNavigation() {
   if (pending_navigation_) {
     pending_navigation_->Complete(false);

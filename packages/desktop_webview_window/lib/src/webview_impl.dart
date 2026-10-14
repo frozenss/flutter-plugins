@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:desktop_webview_window/src/cookie.dart';
+import 'package:desktop_webview_window/src/create_configuration.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -29,7 +30,65 @@ class WebviewImpl extends Webview {
 
   final Set<OnWebMessageReceivedCallback> _onWebMessageReceivedCallbacks = {};
 
+  VoidCallback? _onCloseRequested;
+
+  OnWindowPlacementChangedCallback? _onWindowPlacementChanged;
+
+  ValueChanged<bool>? _onAlwaysOnTopChanged;
+
   WebviewImpl(this.viewId, this.channel);
+
+  void onCloseRequested() => _onCloseRequested?.call();
+
+  void onWindowPlacementChanged(Map<dynamic, dynamic> args) {
+    _onWindowPlacementChanged?.call(
+      WebviewWindowPlacement.fromMap(args),
+      args['reason'] as String,
+    );
+  }
+
+  void onAlwaysOnTopChanged(bool alwaysOnTop) =>
+      _onAlwaysOnTopChanged?.call(alwaysOnTop);
+
+  @override
+  void setOnCloseRequestedCallback(VoidCallback? callback) {
+    _onCloseRequested = callback;
+  }
+
+  @override
+  void setOnWindowPlacementChangedCallback(
+      OnWindowPlacementChangedCallback? callback) {
+    _onWindowPlacementChanged = callback;
+  }
+
+  @override
+  void setOnAlwaysOnTopChangedCallback(ValueChanged<bool>? callback) {
+    _onAlwaysOnTopChanged = callback;
+  }
+
+  @override
+  Future<void> setAlwaysOnTop(bool alwaysOnTop) {
+    return channel.invokeMethod("setAlwaysOnTop", {
+      "viewId": viewId,
+      "value": alwaysOnTop,
+    });
+  }
+
+  @override
+  Future<void> setMemoryUsageTargetLow(bool low) {
+    return channel.invokeMethod("setMemoryUsageTargetLow", {
+      "viewId": viewId,
+      "value": low,
+    });
+  }
+
+  @override
+  Future<WebviewWindowPlacement?> getWindowPlacement() async {
+    final map = await channel.invokeMethod<Map>("getWindowPlacement", {
+      "viewId": viewId,
+    });
+    return map == null ? null : WebviewWindowPlacement.fromMap(map);
+  }
 
   @override
   Future<void> get onClose => _closeCompleter.future;
@@ -175,10 +234,12 @@ class WebviewImpl extends Webview {
   }
 
   @override
-  Future<void> setWebviewWindowVisibility(bool visible) {
+  Future<void> setWebviewWindowVisibility(bool visible,
+      {bool activate = true}) {
     return channel.invokeMethod("setWebviewWindowVisibility", {
       "viewId": viewId,
       "visible": visible,
+      if (!activate) "activate": false,
     });
   }
 

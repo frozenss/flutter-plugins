@@ -78,12 +78,39 @@ void WebviewWindowPlugin::HandleMethodCall(
       return value != nullptr && *value;
     };
     auto openHidden = optional_bool("openHidden");
+
+    WebviewWindow::WindowOptions window_options;
+    window_options.hide_on_close = optional_bool("hideOnClose");
+    window_options.report_placement = optional_bool("reportWindowPlacement");
+    window_options.always_on_top = optional_bool("alwaysOnTop");
+    auto menu_label = arguments->find(
+        flutter::EncodableValue("alwaysOnTopSystemMenuLabel"));
+    if (menu_label != arguments->end()) {
+      if (auto *label = std::get_if<std::string>(&menu_label->second)) {
+        window_options.always_on_top_menu_label = utf8_to_wide(*label);
+      }
+    }
+    auto placement =
+        arguments->find(flutter::EncodableValue("windowPlacement"));
+    if (placement != arguments->end()) {
+      if (auto *map = std::get_if<flutter::EncodableMap>(&placement->second)) {
+        auto value = [map](const char *key) {
+          return map->at(flutter::EncodableValue(key)).LongValue();
+        };
+        window_options.has_placement = true;
+        window_options.placement_normal_rect = RECT{
+            LONG(value("left")), LONG(value("top")), LONG(value("right")),
+            LONG(value("bottom"))};
+        window_options.placement_dpi = UINT(value("dpi"));
+      }
+    }
     auto denyCameraAndMicrophone = optional_bool("denyCameraAndMicrophone");
 
     auto window_id = next_window_id_;
     auto window = std::make_unique<WebviewWindow>(
         method_channel_, window_id, int(titleBarHeight),
         [this, window_id]() { windows_.erase(window_id); });
+    window->SetWindowOptions(std::move(window_options));
     std::shared_ptr<flutter::MethodResult<flutter::EncodableValue>> result2(
         std::move(result));
     window->CreateAndShow(
@@ -217,7 +244,39 @@ void WebviewWindowPlugin::HandleMethodCall(
       result->Error("0", "webview window not ready");
       return;
     }
-    windows_[window_id]->setVisibility(visible);
+    // Optional; absent means the original activating show.
+    bool activate = true;
+    auto activate_it = arguments->find(flutter::EncodableValue("activate"));
+    if (activate_it != arguments->end()) {
+      if (auto *value = std::get_if<bool>(&activate_it->second)) {
+        activate = *value;
+      }
+    }
+    windows_[window_id]->setVisibility(visible, activate);
+    result->Success();
+  } else if (method_call.method_name() == "setAlwaysOnTop" ||
+             method_call.method_name() == "setMemoryUsageTargetLow" ||
+             method_call.method_name() == "getWindowPlacement") {
+    auto *arguments =
+        std::get_if<flutter::EncodableMap>(method_call.arguments());
+    auto window_id =
+        arguments->at(flutter::EncodableValue("viewId")).LongValue();
+    if (!windows_.count(window_id)) {
+      result->Error("0", "can not find webview window for id");
+      return;
+    }
+    auto &window = windows_[window_id];
+    if (method_call.method_name() == "getWindowPlacement") {
+      result->Success(flutter::EncodableValue(window->GetWindowPlacementMap()));
+      return;
+    }
+    auto value =
+        std::get<bool>(arguments->at(flutter::EncodableValue("value")));
+    if (method_call.method_name() == "setAlwaysOnTop") {
+      window->SetAlwaysOnTop(value);
+    } else {
+      window->SetMemoryUsageTargetLow(value);
+    }
     result->Success();
   } else if (method_call.method_name() == "moveWebviewWindow") {
     auto *arguments =

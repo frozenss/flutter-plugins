@@ -1,4 +1,5 @@
 import 'package:desktop_webview_window/src/cookie.dart';
+import 'package:desktop_webview_window/src/create_configuration.dart';
 import 'package:flutter/foundation.dart';
 
 /// Handle custom message from JavaScript in your app.
@@ -16,6 +17,10 @@ typedef OnUrlRequestCallback = bool Function(String url);
 /// Callback when WebView receives a web message
 /// [message] constains the webmessage
 typedef OnWebMessageReceivedCallback = void Function(String message);
+
+/// Windows only. [reason] is `moveSizeEnd` or `close`.
+typedef OnWindowPlacementChangedCallback = void Function(
+    WebviewWindowPlacement placement, String reason);
 
 abstract class Webview {
   Future<void> get onClose;
@@ -56,8 +61,31 @@ abstract class Webview {
   /// Navigate to the next page in the history.
   Future<void> forward();
 
-  /// Show or hide webview window
-  Future<void> setWebviewWindowVisibility(bool visible);
+  /// Show or hide webview window.
+  ///
+  /// On Windows, [activate] false shows the window without taking focus.
+  Future<void> setWebviewWindowVisibility(bool visible, {bool activate = true});
+
+  /// Windows only.
+  Future<void> setAlwaysOnTop(bool alwaysOnTop);
+
+  /// Windows only. Ask WebView2 to lower its memory use, e.g. while hidden.
+  Future<void> setMemoryUsageTargetLow(bool low);
+
+  /// Windows only.
+  Future<WebviewWindowPlacement?> getWindowPlacement();
+
+  /// Windows only, with [CreateConfiguration.hideOnClose]: X was clicked and
+  /// the window is now hidden.
+  void setOnCloseRequestedCallback(VoidCallback? callback);
+
+  /// Windows only, with [CreateConfiguration.reportWindowPlacement].
+  void setOnWindowPlacementChangedCallback(
+      OnWindowPlacementChangedCallback? callback);
+
+  /// Windows only, with [CreateConfiguration.alwaysOnTopSystemMenuLabel]: the
+  /// user toggled the system menu item.
+  void setOnAlwaysOnTopChangedCallback(ValueChanged<bool>? callback);
 
   /// Move and Resize the webview window
   Future<void> moveWebviewWindow(int left, int top, int width, int height);

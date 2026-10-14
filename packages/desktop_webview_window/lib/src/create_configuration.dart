@@ -36,6 +36,28 @@ class CreateConfiguration {
   /// 111.0.1661.34 or later; window creation fails on older runtimes when enabled.
   final bool denyCameraAndMicrophone;
 
+  /// Windows only. Clicking X hides the window instead of destroying it; the
+  /// webview keeps its page. See [Webview.setOnCloseRequestedCallback].
+  final bool hideOnClose;
+
+  /// Windows only. Report the window placement when a move or resize ends and
+  /// (with [hideOnClose]) when X is clicked. See
+  /// [Webview.setOnWindowPlacementChangedCallback].
+  final bool reportWindowPlacement;
+
+  /// Windows only. Create the window always on top.
+  final bool alwaysOnTop;
+
+  /// Windows only. When set, the window's system menu gets a checkable item
+  /// with this label that toggles always-on-top. See
+  /// [Webview.setOnAlwaysOnTopChangedCallback].
+  final String? alwaysOnTopSystemMenuLabel;
+
+  /// Windows only. Restore a placement previously reported by the window.
+  /// Overrides [windowWidth], [windowHeight] and the position settings. A
+  /// rect that is completely off-screen is pulled back into view by Windows.
+  final WebviewWindowPlacement? windowPlacement;
+
   const CreateConfiguration({
     this.windowWidth = 1280,
     this.windowHeight = 720,
@@ -49,6 +71,11 @@ class CreateConfiguration {
     this.openMaximized = false,
     this.openHidden = false,
     this.denyCameraAndMicrophone = false,
+    this.hideOnClose = false,
+    this.reportWindowPlacement = false,
+    this.alwaysOnTop = false,
+    this.alwaysOnTopSystemMenuLabel,
+    this.windowPlacement,
   });
 
   factory CreateConfiguration.platform() {
@@ -70,5 +97,57 @@ class CreateConfiguration {
         "openMaximized": openMaximized,
         "openHidden": openHidden,
         "denyCameraAndMicrophone": denyCameraAndMicrophone,
+        "hideOnClose": hideOnClose,
+        "reportWindowPlacement": reportWindowPlacement,
+        "alwaysOnTop": alwaysOnTop,
+        if (alwaysOnTopSystemMenuLabel != null)
+          "alwaysOnTopSystemMenuLabel": alwaysOnTopSystemMenuLabel,
+        if (windowPlacement != null)
+          "windowPlacement": windowPlacement!.toMap(),
       };
+}
+
+/// The restored (normal) bounds of a webview window in physical pixels,
+/// workspace coordinates, as Windows' `GetWindowPlacement` reports them,
+/// with the DPI they were measured at.
+class WebviewWindowPlacement {
+  const WebviewWindowPlacement({
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+    required this.dpi,
+    this.maximized = false,
+  });
+
+  factory WebviewWindowPlacement.fromMap(Map<dynamic, dynamic> map) {
+    return WebviewWindowPlacement(
+      left: map['left'] as int,
+      top: map['top'] as int,
+      right: map['right'] as int,
+      bottom: map['bottom'] as int,
+      dpi: map['dpi'] as int,
+      maximized: map['maximized'] as bool? ?? false,
+    );
+  }
+
+  final int left;
+  final int top;
+  final int right;
+  final int bottom;
+  final int dpi;
+  final bool maximized;
+
+  Map<String, Object> toMap() => {
+        'left': left,
+        'top': top,
+        'right': right,
+        'bottom': bottom,
+        'dpi': dpi,
+        'maximized': maximized,
+      };
+
+  @override
+  String toString() => 'WebviewWindowPlacement($left,$top,$right,$bottom '
+      'dpi=$dpi maximized=$maximized)';
 }

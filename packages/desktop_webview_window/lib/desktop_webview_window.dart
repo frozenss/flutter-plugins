@@ -121,6 +121,15 @@ class WebviewWindow {
         _webviews.remove(webview);
         webview.onClosed();
         break;
+      case "onWindowCloseRequested":
+        webview.onCloseRequested();
+        break;
+      case "onWindowPlacementChanged":
+        webview.onWindowPlacementChanged(args);
+        break;
+      case "onAlwaysOnTopChanged":
+        webview.onAlwaysOnTopChanged(args['alwaysOnTop'] as bool);
+        break;
       case "onJavaScriptMessage":
         webview.onJavaScriptMessage(args['name'], args['body']);
         break;

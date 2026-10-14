@@ -26,6 +26,14 @@ int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
 }
 
+// System menu command ids must be below 0xF000 with the low four bits clear.
+constexpr UINT kAlwaysOnTopSysCommand = 0x0010;
+
+UINT DpiForRect(const RECT &rect) {
+  HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
+  return FlutterDesktopGetDpiForMonitor(monitor);
+}
+
 }
 
 using namespace Microsoft::WRL;
@@ -103,6 +111,17 @@ void WebviewWindow::CreateAndShow(const std::wstring &title, int height, int wid
     SetWindowPos(hwnd_.get(), nullptr, rc.left, rc.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
   }
 
+  if (options_.has_placement && !openMaximized) {
+    ApplySavedPlacement();
+    GetClientRect(hwnd_.get(), &rc);
+  }
+  if (!options_.always_on_top_menu_label.empty()) {
+    InstallAlwaysOnTopMenuItem();
+  }
+  if (options_.always_on_top) {
+    SetAlwaysOnTop(true);
+  }
+
   auto title_bar_height = Scale(title_bar_height_, scale_factor);
 
   // Create the browser view.
@@ -159,6 +178,96 @@ void WebviewWindow::setVisibility(bool visible)
   if (web_view_) {
     web_view_->SetVisible(visible);
   }
+}
+
+void WebviewWindow::setVisibility(bool visible, bool activate) {
+  if (!visible || activate) {
+    setVisibility(visible);
+    return;
+  }
+  ::ShowWindow(hwnd_.get(), SW_SHOWNOACTIVATE);
+  if (web_view_) {
+    web_view_->SetVisible(true);
+  }
+}
+
+void WebviewWindow::SetAlwaysOnTop(bool on_top) {
+  always_on_top_ = on_top;
+  ::SetWindowPos(hwnd_.get(), on_top ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0,
+                 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (!options_.always_on_top_menu_label.empty()) {
+    HMENU menu = GetSystemMenu(hwnd_.get(), FALSE);
+    if (menu) {
+      CheckMenuItem(menu, kAlwaysOnTopSysCommand,
+                    MF_BYCOMMAND | (on_top ? MF_CHECKED : MF_UNCHECKED));
+    }
+  }
+}
+
+void WebviewWindow::SetMemoryUsageTargetLow(bool low) {
+  if (web_view_) {
+    web_view_->SetMemoryUsageTargetLow(low);
+  }
+}
+
+void WebviewWindow::InstallAlwaysOnTopMenuItem() {
+  HMENU menu = GetSystemMenu(hwnd_.get(), FALSE);
+  if (!menu) return;
+  AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenu(menu, MF_STRING | (always_on_top_ ? MF_CHECKED : MF_UNCHECKED),
+             kAlwaysOnTopSysCommand, options_.always_on_top_menu_label.c_str());
+}
+
+void WebviewWindow::ApplySavedPlacement() {
+  RECT normal = options_.placement_normal_rect;
+  // The rect was saved in physical pixels at placement_dpi. If the monitor it
+  // lands on now has another scale, keep the same logical size.
+  UINT target_dpi = DpiForRect(normal);
+  if (options_.placement_dpi > 0 && target_dpi != options_.placement_dpi) {
+    double ratio = static_cast<double>(target_dpi) / options_.placement_dpi;
+    normal.right = normal.left + Scale(normal.right - normal.left, ratio);
+    normal.bottom = normal.top + Scale(normal.bottom - normal.top, ratio);
+  }
+  WINDOWPLACEMENT wp{};
+  wp.length = sizeof(WINDOWPLACEMENT);
+  GetWindowPlacement(hwnd_.get(), &wp);
+  wp.flags = 0;
+  // Keep the current visibility: the caller shows the window later.
+  wp.showCmd = IsWindowVisible(hwnd_.get()) ? SW_SHOWNOACTIVATE : SW_HIDE;
+  wp.rcNormalPosition = normal;
+  applying_placement_ = true;
+  // The system pulls a rect that is completely off-screen back into view.
+  SetWindowPlacement(hwnd_.get(), &wp);
+  applying_placement_ = false;
+}
+
+flutter::EncodableMap WebviewWindow::GetWindowPlacementMap() const {
+  WINDOWPLACEMENT wp{};
+  wp.length = sizeof(WINDOWPLACEMENT);
+  GetWindowPlacement(hwnd_.get(), &wp);
+  const RECT &r = wp.rcNormalPosition;
+  return flutter::EncodableMap{
+      {flutter::EncodableValue("left"), flutter::EncodableValue(int(r.left))},
+      {flutter::EncodableValue("top"), flutter::EncodableValue(int(r.top))},
+      {flutter::EncodableValue("right"), flutter::EncodableValue(int(r.right))},
+      {flutter::EncodableValue("bottom"),
+       flutter::EncodableValue(int(r.bottom))},
+      {flutter::EncodableValue("maximized"),
+       flutter::EncodableValue(wp.showCmd == SW_SHOWMAXIMIZED ||
+                               IsZoomed(hwnd_.get()) != FALSE)},
+      {flutter::EncodableValue("dpi"),
+       flutter::EncodableValue(int(FlutterDesktopGetDpiForMonitor(
+                                   MonitorFromWindow(hwnd_.get(), MONITOR_DEFAULTTONEAREST))))},
+  };
+}
+
+void WebviewWindow::ReportPlacement(const char *reason) {
+  auto args = GetWindowPlacementMap();
+  args[flutter::EncodableValue("id")] = flutter::EncodableValue(window_id_);
+  args[flutter::EncodableValue("reason")] = flutter::EncodableValue(reason);
+  method_channel_->InvokeMethod(
+      "onWindowPlacementChanged",
+      std::make_unique<flutter::EncodableValue>(std::move(args)));
 }
 
 void WebviewWindow::moveWebviewWindow(int left, int top, int width, int height) {
@@ -247,7 +356,42 @@ WebviewWindow::MessageHandler(
       }
       return 0;
     }
+    case WM_CLOSE: {
+      if (!options_.hide_on_close) break;
+      if (options_.report_placement) {
+        ReportPlacement("close");
+      }
+      setVisibility(false);
+      auto args = flutter::EncodableMap{
+          {flutter::EncodableValue("id"), flutter::EncodableValue(window_id_)}};
+      method_channel_->InvokeMethod(
+          "onWindowCloseRequested",
+          std::make_unique<flutter::EncodableValue>(args));
+      return 0;
+    }
+    case WM_EXITSIZEMOVE: {
+      if (options_.report_placement) {
+        ReportPlacement("moveSizeEnd");
+      }
+      break;
+    }
+    case WM_SYSCOMMAND: {
+      if ((wparam & 0xFFF0) == kAlwaysOnTopSysCommand &&
+          !options_.always_on_top_menu_label.empty()) {
+        SetAlwaysOnTop(!always_on_top_);
+        auto args = flutter::EncodableMap{
+            {flutter::EncodableValue("id"), flutter::EncodableValue(window_id_)},
+            {flutter::EncodableValue("alwaysOnTop"),
+             flutter::EncodableValue(always_on_top_)}};
+        method_channel_->InvokeMethod(
+            "onAlwaysOnTopChanged",
+            std::make_unique<flutter::EncodableValue>(args));
+        return 0;
+      }
+      break;
+    }
     case WM_DPICHANGED: {
+      if (applying_placement_) return 0;
       auto newRectSize = reinterpret_cast<RECT *>(lparam);
       LONG newWidth = newRectSize->right - newRectSize->left;
       LONG newHeight = newRectSize->bottom - newRectSize->top;
