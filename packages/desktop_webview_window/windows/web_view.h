@@ -24,10 +24,17 @@ class WebView {
 
  public:
 
+  struct ZoomOptions {
+    bool enable_zoom_control = false;
+    bool has_initial_zoom_factor = false;
+    double initial_zoom_factor = 1.0;
+  };
+
   WebView(std::shared_ptr<flutter::MethodChannel<flutter::EncodableValue>> method_channel,
           int64_t web_view_id,
           std::wstring userDataFolder,
           bool deny_camera_and_microphone,
+          ZoomOptions zoom_options,
           std::function<void(HRESULT)> on_web_view_created_callback
   );
 
@@ -74,6 +81,12 @@ class WebView {
   // ICoreWebView2_19::MemoryUsageTargetLevel; a no-op on runtimes without it.
   void SetMemoryUsageTargetLow(bool low);
 
+  // Page zoom (opt-in via ZoomOptions.enable_zoom_control).
+  double GetZoomFactor() const;
+  void SetZoomFactor(double zoom_factor);
+  // Ctrl+wheel step when the host window is not focused.
+  void ZoomByWheelDelta(short delta);
+
  private:
   wil::unique_hwnd view_window_;
 
@@ -101,12 +114,16 @@ class WebView {
 
   bool deny_camera_and_microphone_{false};
 
+  ZoomOptions zoom_options_{};
+
   // Applied when the controller is created, if SetVisible came first.
   bool visible_{true};
 
   void CancelPendingNavigation();
 
   HRESULT OnWebviewControllerCreated();
+
+  void ReportZoomFactorChanged();
 
   [[nodiscard]] bool CanGoBack() const;
 

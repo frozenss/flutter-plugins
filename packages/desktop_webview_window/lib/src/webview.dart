@@ -87,6 +87,23 @@ abstract class Webview {
   /// user toggled the system menu item.
   void setOnAlwaysOnTopChangedCallback(ValueChanged<bool>? callback);
 
+  /// Windows only, with [CreateConfiguration.enableZoomControl].
+  Future<double> getZoomFactor();
+
+  /// Windows only, with [CreateConfiguration.enableZoomControl].
+  Future<void> setZoomFactor(double zoomFactor);
+
+  /// Windows only, with [CreateConfiguration.enableZoomControl].
+  void setOnZoomFactorChangedCallback(ValueChanged<double>? callback);
+
+  /// Windows only, with [CreateConfiguration.showLockToolbar]. Updates the
+  /// lock toggle without reading or writing page scroll.
+  Future<void> setLockToolbarLocked(bool locked);
+
+  /// Windows only, with [CreateConfiguration.showLockToolbar]: the user
+  /// toggled the lock switch.
+  void setOnLockToolbarChangedCallback(ValueChanged<bool>? callback);
+
   /// Move and Resize the webview window
   Future<void> moveWebviewWindow(int left, int top, int width, int height);
 

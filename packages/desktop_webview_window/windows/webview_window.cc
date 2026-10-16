@@ -6,6 +6,7 @@
 
 #include "webview_window.h"
 
+#include <algorithm>
 #include <tchar.h>
 #include <utility>
 
@@ -29,6 +30,12 @@ int Scale(int source, double scale_factor) {
 // System menu command ids must be below 0xF000 with the low four bits clear.
 constexpr UINT kAlwaysOnTopSysCommand = 0x0010;
 
+// Child control id for the lock toggle on the native strip.
+constexpr int kLockButtonId = 1001;
+
+// Logical height of the lock strip under the title bar.
+constexpr int kLockToolbarLogicalHeight = 28;
+
 UINT DpiForRect(const RECT &rect) {
   HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
   return FlutterDesktopGetDpiForMonitor(monitor);
@@ -37,6 +44,9 @@ UINT DpiForRect(const RECT &rect) {
 }
 
 using namespace Microsoft::WRL;
+
+HHOOK WebviewWindow::zoom_mouse_hook_ = nullptr;
+std::vector<WebviewWindow *> WebviewWindow::zoom_hook_windows_;
 
 WebviewWindow::WebviewWindow(
     MethodChannelPtr method_channel,
@@ -52,7 +62,10 @@ WebviewWindow::WebviewWindow(
 }
 
 WebviewWindow::~WebviewWindow() {
+  UnregisterZoomMouseHook();
   flutter_action_bar_.reset();
+  lock_button_.reset();
+  lock_toolbar_.reset();
   web_view_.reset();
   SetWindowLongPtr(hwnd_.get(), GWLP_USERDATA, 0);
   hwnd_.reset();
@@ -122,11 +135,14 @@ void WebviewWindow::CreateAndShow(const std::wstring &title, int height, int wid
     SetAlwaysOnTop(true);
   }
 
-  auto title_bar_height = Scale(title_bar_height_, scale_factor);
-
   // Create the browser view.
+  webview_window::WebView::ZoomOptions zoom_options;
+  zoom_options.enable_zoom_control = options_.enable_zoom_control;
+  zoom_options.has_initial_zoom_factor = options_.has_initial_zoom_factor;
+  zoom_options.initial_zoom_factor = options_.initial_zoom_factor;
   web_view_ = std::make_unique<webview_window::WebView>(
       method_channel_, window_id_, userDataFolder, denyCameraAndMicrophone,
+      zoom_options,
       [callback](HRESULT hr) {
         if (SUCCEEDED(hr)) {
           callback(true);
@@ -141,10 +157,6 @@ void WebviewWindow::CreateAndShow(const std::wstring &title, int height, int wid
 
   auto web_view_handle = web_view_->NativeWindow().get();
   SetParent(web_view_handle, hwnd_.get());
-  MoveWindow(web_view_handle, 0, title_bar_height,
-             rc.right - rc.left,
-             rc.bottom - rc.top - title_bar_height,
-             true);
   ShowWindow(web_view_handle, SW_SHOW);
 
   // Create the title bar view.
@@ -153,8 +165,18 @@ void WebviewWindow::CreateAndShow(const std::wstring &title, int height, int wid
     flutter_action_bar_ = std::make_unique<webview_window::FlutterView>(std::move(args));
     auto title_bar_handle = flutter_action_bar_->GetWindow();
     SetParent(title_bar_handle, hwnd_.get());
-    MoveWindow(title_bar_handle, 0, 0, rc.right - rc.left, title_bar_height, true);
     ShowWindow(title_bar_handle, SW_SHOW);
+  }
+
+  if (options_.show_lock_toolbar) {
+    lock_toolbar_locked_ = options_.lock_toolbar_initially_locked;
+    CreateLockToolbar(rc.right - rc.left, scale_factor);
+  }
+
+  LayoutChildren(rc, scale_factor);
+
+  if (options_.enable_zoom_control) {
+    RegisterZoomMouseHook();
   }
 
   assert(hwnd_ != nullptr);
@@ -164,6 +186,49 @@ void WebviewWindow::CreateAndShow(const std::wstring &title, int height, int wid
     UpdateWindow(hwnd_.get());
   }
 
+}
+
+void WebviewWindow::RegisterZoomMouseHook() {
+  auto &windows = zoom_hook_windows_;
+  if (std::find(windows.begin(), windows.end(), this) != windows.end()) {
+    return;
+  }
+  windows.push_back(this);
+  if (!zoom_mouse_hook_) {
+    zoom_mouse_hook_ = SetWindowsHookExW(WH_MOUSE_LL, ZoomMouseHookProc,
+                                         GetModuleHandle(nullptr), 0);
+  }
+}
+
+void WebviewWindow::UnregisterZoomMouseHook() {
+  auto &windows = zoom_hook_windows_;
+  windows.erase(std::remove(windows.begin(), windows.end(), this),
+                windows.end());
+  if (windows.empty() && zoom_mouse_hook_) {
+    UnhookWindowsHookEx(zoom_mouse_hook_);
+    zoom_mouse_hook_ = nullptr;
+  }
+}
+
+LRESULT CALLBACK WebviewWindow::ZoomMouseHookProc(int code, WPARAM wparam,
+                                                  LPARAM lparam) {
+  if (code == HC_ACTION && wparam == WM_MOUSEWHEEL &&
+      (GetKeyState(VK_CONTROL) & 0x8000)) {
+    const auto *info = reinterpret_cast<MSLLHOOKSTRUCT *>(lparam);
+    HWND under = WindowFromPoint(info->pt);
+    for (auto *window : zoom_hook_windows_) {
+      if (!window || !window->hwnd_ || !window->web_view_) continue;
+      HWND root = window->hwnd_.get();
+      if (under != root && !IsChild(root, under)) continue;
+      // Focused case: WebView2 IsZoomControlEnabled handles Ctrl+wheel.
+      if (GetForegroundWindow() == root) break;
+      const short delta = GET_WHEEL_DELTA_WPARAM(info->mouseData);
+      window->web_view_->ZoomByWheelDelta(delta);
+      // Swallow so the focused main window does not also scroll/zoom.
+      return 1;
+    }
+  }
+  return CallNextHookEx(zoom_mouse_hook_, code, wparam, lparam);
 }
 
 void WebviewWindow::SetBrightness(int brightness) {
@@ -210,12 +275,103 @@ void WebviewWindow::SetMemoryUsageTargetLow(bool low) {
   }
 }
 
+void WebviewWindow::SetLockToolbarLocked(bool locked) {
+  lock_toolbar_locked_ = locked;
+  if (lock_button_) {
+    SendMessage(lock_button_.get(), BM_SETCHECK,
+                locked ? BST_CHECKED : BST_UNCHECKED, 0);
+  }
+}
+
 void WebviewWindow::InstallAlwaysOnTopMenuItem() {
   HMENU menu = GetSystemMenu(hwnd_.get(), FALSE);
   if (!menu) return;
   AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenu(menu, MF_STRING | (always_on_top_ ? MF_CHECKED : MF_UNCHECKED),
              kAlwaysOnTopSysCommand, options_.always_on_top_menu_label.c_str());
+}
+
+int WebviewWindow::ContentTop(double scale_factor) const {
+  auto top = Scale(title_bar_height_, scale_factor);
+  if (options_.show_lock_toolbar) {
+    top += Scale(kLockToolbarLogicalHeight, scale_factor);
+  }
+  return top;
+}
+
+void WebviewWindow::CreateLockToolbar(int client_width, double scale_factor) {
+  const int toolbar_height = Scale(kLockToolbarLogicalHeight, scale_factor);
+  const int title_bar_height = Scale(title_bar_height_, scale_factor);
+  lock_toolbar_ = wil::unique_hwnd(::CreateWindowEx(
+      0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
+      0, title_bar_height, client_width, toolbar_height, hwnd_.get(), nullptr,
+      GetModuleHandle(nullptr), nullptr));
+  // Short strip with one lock toggle; label is the control itself.
+  // Label is U+9501; keep this source ASCII-only for MSVC code-page builds.
+  const int pad = Scale(6, scale_factor);
+  lock_button_ = wil::unique_hwnd(::CreateWindowEx(
+      0, L"BUTTON", L"\x9501",
+      WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_LEFT | BS_VCENTER,
+      pad, title_bar_height, Scale(72, scale_factor), toolbar_height, hwnd_.get(),
+      reinterpret_cast<HMENU>(static_cast<INT_PTR>(kLockButtonId)),
+      GetModuleHandle(nullptr), nullptr));
+  if (lock_button_) {
+    SendMessage(lock_button_.get(), WM_SETFONT,
+                reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),
+                TRUE);
+    if (lock_toolbar_locked_) {
+      SendMessage(lock_button_.get(), BM_SETCHECK, BST_CHECKED, 0);
+    }
+  }
+}
+
+void WebviewWindow::LayoutChildren(const RECT &client_rect,
+                                   double scale_factor) {
+  const int title_bar_height = Scale(title_bar_height_, scale_factor);
+  const int content_top = ContentTop(scale_factor);
+  const int width = client_rect.right - client_rect.left;
+  const int height = client_rect.bottom - client_rect.top;
+
+  if (flutter_action_bar_) {
+    if (last_title_bar_width_ != width) {
+      last_title_bar_width_ = width;
+      MoveWindow(flutter_action_bar_->GetWindow(), 0, 0, width,
+                 title_bar_height, true);
+    } else {
+      last_title_bar_width_ = width + 1;
+      MoveWindow(flutter_action_bar_->GetWindow(), 0, 0,
+                 last_title_bar_width_, title_bar_height, true);
+    }
+  }
+
+  if (lock_toolbar_) {
+    const int toolbar_height = Scale(kLockToolbarLogicalHeight, scale_factor);
+    MoveWindow(lock_toolbar_.get(), 0, title_bar_height, width, toolbar_height,
+               true);
+  }
+  if (lock_button_) {
+    const int toolbar_height = Scale(kLockToolbarLogicalHeight, scale_factor);
+    const int pad = Scale(6, scale_factor);
+    MoveWindow(lock_button_.get(), pad, title_bar_height, Scale(72, scale_factor),
+               toolbar_height, true);
+  }
+
+  if (web_view_ != nullptr) {
+    MoveWindow(web_view_->NativeWindow().get(), 0, content_top, width,
+               height - content_top, true);
+    web_view_->UpdateBounds();
+  }
+}
+
+void WebviewWindow::ReportLockToolbarChanged() {
+  auto args = flutter::EncodableMap{
+      {flutter::EncodableValue("id"), flutter::EncodableValue(window_id_)},
+      {flutter::EncodableValue("locked"),
+       flutter::EncodableValue(lock_toolbar_locked_)},
+  };
+  method_channel_->InvokeMethod(
+      "onLockToolbarChanged",
+      std::make_unique<flutter::EncodableValue>(std::move(args)));
 }
 
 void WebviewWindow::ApplySavedPlacement() {
@@ -338,6 +494,8 @@ WebviewWindow::MessageHandler(
   switch (message) {
     case WM_DESTROY: {
       flutter_action_bar_.reset();
+      lock_button_.reset();
+      lock_toolbar_.reset();
       web_view_.reset();
 
       // might receive multiple WM_DESTROY messages.
@@ -375,6 +533,47 @@ WebviewWindow::MessageHandler(
       }
       break;
     }
+    case WM_MOUSEACTIVATE: {
+      // Lock strip clicks must not activate the window, so point-word lookup
+      // can keep typing in the main window.
+      if (options_.show_lock_toolbar && lock_button_) {
+        POINT pt;
+        if (GetCursorPos(&pt)) {
+          ScreenToClient(hwnd, &pt);
+          HWND child = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
+          if (child != nullptr &&
+              (child == lock_button_.get() || child == lock_toolbar_.get())) {
+            return MA_NOACTIVATE;
+          }
+        }
+      }
+      break;
+    }
+    case WM_COMMAND: {
+      if (LOWORD(wparam) == kLockButtonId &&
+          HIWORD(wparam) == BN_CLICKED &&
+          options_.show_lock_toolbar) {
+        const bool locked =
+            SendMessage(lock_button_.get(), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        lock_toolbar_locked_ = locked;
+        ReportLockToolbarChanged();
+        return 0;
+      }
+      break;
+    }
+    case WM_MOUSEWHEEL: {
+      // When the main window keeps focus (point-word lookup), Windows can still
+      // deliver wheel messages to the hovered window. Apply Ctrl+wheel zoom
+      // without activating, and only when we are not the foreground window so
+      // WebView2's own zoom control is not doubled.
+      if (options_.enable_zoom_control && web_view_ &&
+          (GetKeyState(VK_CONTROL) & 0x8000) &&
+          GetForegroundWindow() != hwnd_.get()) {
+        web_view_->ZoomByWheelDelta(GET_WHEEL_DELTA_WPARAM(wparam));
+        return 0;
+      }
+      break;
+    }
     case WM_SYSCOMMAND: {
       if ((wparam & 0xFFF0) == kAlwaysOnTopSysCommand &&
           !options_.always_on_top_menu_label.empty()) {
@@ -406,33 +605,7 @@ WebviewWindow::MessageHandler(
       HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
       UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
       double scale_factor = dpi / 96.0;
-
-      auto title_bar_height = Scale(title_bar_height_, scale_factor);
-
-      if (web_view_ != nullptr) {
-        MoveWindow(web_view_->NativeWindow().get(), 0, title_bar_height,
-                   rect.right - rect.left, rect.bottom - rect.top - title_bar_height,
-                   true);
-        web_view_->UpdateBounds();
-      }
-
-      if (flutter_action_bar_) {
-        // FIXME(BOYAN) remove this trick if flutter provide a properly way to force redraw the flutter view.
-        // When user only change the height of window, flutter title bar height will not change, because the title_bar_height
-        // is a fixed value. In this situation, the flutter view will not perform draw since no size changed. So we need
-        // perform a force redraw to flutter view. Although flutter provide a function FlutterDesktopViewControllerForceRedraw.
-        // https://github.com/flutter/engine/pull/24186 But we can not use this because it not provided on wrapper.
-        if (last_title_bar_width_ != rect.right - rect.left) {
-          // Size and position the flutter window.
-          last_title_bar_width_ = rect.right - rect.left;
-          MoveWindow(flutter_action_bar_->GetWindow(), 0, 0,
-                     last_title_bar_width_, title_bar_height, true);
-        } else {
-          last_title_bar_width_ = rect.right - rect.left + 1;
-          MoveWindow(flutter_action_bar_->GetWindow(), 0, 0,
-                     last_title_bar_width_, title_bar_height, true);
-        }
-      }
+      LayoutChildren(rect, scale_factor);
       return 0;
     }
     case WM_FONTCHANGE: {

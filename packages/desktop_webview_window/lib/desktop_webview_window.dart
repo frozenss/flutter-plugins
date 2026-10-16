@@ -130,6 +130,12 @@ class WebviewWindow {
       case "onAlwaysOnTopChanged":
         webview.onAlwaysOnTopChanged(args['alwaysOnTop'] as bool);
         break;
+      case "onZoomFactorChanged":
+        webview.onZoomFactorChanged((args['zoomFactor'] as num).toDouble());
+        break;
+      case "onLockToolbarChanged":
+        webview.onLockToolbarChanged(args['locked'] as bool);
+        break;
       case "onJavaScriptMessage":
         webview.onJavaScriptMessage(args['name'], args['body']);
         break;

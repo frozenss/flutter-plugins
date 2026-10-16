@@ -104,6 +104,24 @@ void WebviewWindowPlugin::HandleMethodCall(
         window_options.placement_dpi = UINT(value("dpi"));
       }
     }
+    window_options.enable_zoom_control = optional_bool("enableZoomControl");
+    auto zoom_it = arguments->find(flutter::EncodableValue("initialZoomFactor"));
+    if (zoom_it != arguments->end()) {
+      if (auto *zoom = std::get_if<double>(&zoom_it->second)) {
+        window_options.has_initial_zoom_factor = true;
+        window_options.initial_zoom_factor = *zoom;
+      } else if (auto *zoom_int = std::get_if<int32_t>(&zoom_it->second)) {
+        window_options.has_initial_zoom_factor = true;
+        window_options.initial_zoom_factor = static_cast<double>(*zoom_int);
+      } else if (auto *zoom_long = std::get_if<int64_t>(&zoom_it->second)) {
+        window_options.has_initial_zoom_factor = true;
+        window_options.initial_zoom_factor =
+            static_cast<double>(*zoom_long);
+      }
+    }
+    window_options.show_lock_toolbar = optional_bool("showLockToolbar");
+    window_options.lock_toolbar_initially_locked =
+        optional_bool("lockToolbarInitiallyLocked");
     auto denyCameraAndMicrophone = optional_bool("denyCameraAndMicrophone");
 
     auto window_id = next_window_id_;
@@ -256,6 +274,7 @@ void WebviewWindowPlugin::HandleMethodCall(
     result->Success();
   } else if (method_call.method_name() == "setAlwaysOnTop" ||
              method_call.method_name() == "setMemoryUsageTargetLow" ||
+             method_call.method_name() == "setLockToolbarLocked" ||
              method_call.method_name() == "getWindowPlacement") {
     auto *arguments =
         std::get_if<flutter::EncodableMap>(method_call.arguments());
@@ -274,9 +293,43 @@ void WebviewWindowPlugin::HandleMethodCall(
         std::get<bool>(arguments->at(flutter::EncodableValue("value")));
     if (method_call.method_name() == "setAlwaysOnTop") {
       window->SetAlwaysOnTop(value);
-    } else {
+    } else if (method_call.method_name() == "setMemoryUsageTargetLow") {
       window->SetMemoryUsageTargetLow(value);
+    } else {
+      window->SetLockToolbarLocked(value);
     }
+    result->Success();
+  } else if (method_call.method_name() == "getZoomFactor" ||
+             method_call.method_name() == "setZoomFactor") {
+    auto *arguments =
+        std::get_if<flutter::EncodableMap>(method_call.arguments());
+    auto window_id =
+        arguments->at(flutter::EncodableValue("viewId")).LongValue();
+    if (!windows_.count(window_id)) {
+      result->Error("0", "can not find webview window for id");
+      return;
+    }
+    if (!windows_[window_id]->GetWebView()) {
+      result->Error("0", "webview window not ready");
+      return;
+    }
+    auto &webview = windows_[window_id]->GetWebView();
+    if (method_call.method_name() == "getZoomFactor") {
+      result->Success(flutter::EncodableValue(webview->GetZoomFactor()));
+      return;
+    }
+    double zoom = 1.0;
+    auto value_it = arguments->find(flutter::EncodableValue("value"));
+    if (value_it != arguments->end()) {
+      if (auto *as_double = std::get_if<double>(&value_it->second)) {
+        zoom = *as_double;
+      } else if (auto *as_int = std::get_if<int32_t>(&value_it->second)) {
+        zoom = static_cast<double>(*as_int);
+      } else if (auto *as_long = std::get_if<int64_t>(&value_it->second)) {
+        zoom = static_cast<double>(*as_long);
+      }
+    }
+    webview->SetZoomFactor(zoom);
     result->Success();
   } else if (method_call.method_name() == "moveWebviewWindow") {
     auto *arguments =

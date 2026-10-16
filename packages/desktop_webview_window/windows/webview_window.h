@@ -15,6 +15,7 @@
 #include <string>
 #include <memory>
 #include <functional>
+#include <vector>
 
 #include <wrl.h>
 #include "wil/com.h"
@@ -62,6 +63,13 @@ class WebviewWindow {
     bool has_placement = false;
     RECT placement_normal_rect{};
     UINT placement_dpi = 96;
+    // WebView2 page zoom (Ctrl+wheel / Ctrl+＋－0) and ZoomFactor API.
+    bool enable_zoom_control = false;
+    bool has_initial_zoom_factor = false;
+    double initial_zoom_factor = 1.0;
+    // Native lock strip under the title bar; plugin does not touch scroll.
+    bool show_lock_toolbar = false;
+    bool lock_toolbar_initially_locked = false;
   };
 
   void SetWindowOptions(WindowOptions options) { options_ = std::move(options); }
@@ -73,6 +81,8 @@ class WebviewWindow {
   void SetAlwaysOnTop(bool on_top);
 
   void SetMemoryUsageTargetLow(bool low);
+
+  void SetLockToolbarLocked(bool locked);
 
   [[nodiscard]] flutter::EncodableMap GetWindowPlacementMap() const;
 
@@ -118,6 +128,10 @@ class WebviewWindow {
 
   std::unique_ptr<webview_window::WebView> web_view_;
 
+  wil::unique_hwnd lock_toolbar_;
+
+  wil::unique_hwnd lock_button_;
+
   int last_title_bar_width_ = 0;
 
   bool destroyed_ = false;
@@ -128,6 +142,8 @@ class WebviewWindow {
 
   bool always_on_top_ = false;
 
+  bool lock_toolbar_locked_ = false;
+
   // Set while CreateAndShow applies a saved placement, so the WM_DPICHANGED
   // it may trigger does not rescale a rect that is already in target pixels.
   bool applying_placement_ = false;
@@ -136,7 +152,27 @@ class WebviewWindow {
 
   void InstallAlwaysOnTopMenuItem();
 
+  void CreateLockToolbar(int client_width, double scale_factor);
+
+  void LayoutChildren(const RECT &client_rect, double scale_factor);
+
+  int ContentTop(double scale_factor) const;
+
   void ReportPlacement(const char *reason);
+
+  void ReportLockToolbarChanged();
+
+  void RegisterZoomMouseHook();
+
+  void UnregisterZoomMouseHook();
+
+  // Low-level mouse hook so Ctrl+wheel zooms while the pointer is over this
+  // window even when another window (e.g. the Flutter main window) has focus.
+  static LRESULT CALLBACK ZoomMouseHookProc(int code, WPARAM wparam,
+                                            LPARAM lparam);
+
+  static HHOOK zoom_mouse_hook_;
+  static std::vector<WebviewWindow *> zoom_hook_windows_;
 
   // Processes and route salient window messages for mouse handling,
   // size change and DPI. Delegates handling of these to member overloads that

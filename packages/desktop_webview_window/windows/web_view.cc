@@ -35,12 +35,13 @@ WebView::WebView(
     std::shared_ptr<flutter::MethodChannel<flutter::EncodableValue>>
         method_channel,
     int64_t web_view_id, std::wstring userDataFolder,
-    bool deny_camera_and_microphone,
+    bool deny_camera_and_microphone, ZoomOptions zoom_options,
     std::function<void(HRESULT)> on_web_view_created)
     : method_channel_(std::move(method_channel)),
       web_view_id_(web_view_id),
       user_data_folder_(std::move(userDataFolder)),
       deny_camera_and_microphone_(deny_camera_and_microphone),
+      zoom_options_(zoom_options),
       on_web_view_created_callback_(std::move(on_web_view_created)) {
   RegisterWindowClass(kWebViewClassName, WndProc);
   view_window_ = wil::unique_hwnd(::CreateWindowEx(
@@ -118,7 +119,7 @@ HRESULT WebView::OnWebviewControllerCreated() {
   }
   
   settings->put_IsScriptEnabled(true);
-  settings->put_IsZoomControlEnabled(false);
+  settings->put_IsZoomControlEnabled(zoom_options_.enable_zoom_control);
   settings->put_AreDefaultContextMenusEnabled(false);
   settings->put_IsStatusBarEnabled(false);
   settings->put_IsWebMessageEnabled(true);
@@ -131,6 +132,21 @@ HRESULT WebView::OnWebviewControllerCreated() {
     if (SUCCEEDED(hr) && user_agent) {
       default_user_agent_ = std::wstring(user_agent.get());
     }
+  }
+
+  if (zoom_options_.enable_zoom_control) {
+    if (zoom_options_.has_initial_zoom_factor &&
+        zoom_options_.initial_zoom_factor > 0) {
+      webview_controller_->put_ZoomFactor(zoom_options_.initial_zoom_factor);
+    }
+    webview_controller_->add_ZoomFactorChanged(
+        Callback<ICoreWebView2ZoomFactorChangedEventHandler>(
+            [this](ICoreWebView2Controller *sender, IUnknown *args) {
+              ReportZoomFactorChanged();
+              return S_OK;
+            })
+            .Get(),
+        nullptr);
   }
 
   webview_controller_->put_IsVisible(visible_);
@@ -419,6 +435,43 @@ void WebView::SetMemoryUsageTargetLow(bool low) {
   webview19->put_MemoryUsageTargetLevel(
       low ? COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
           : COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL);
+}
+
+double WebView::GetZoomFactor() const {
+  if (!webview_controller_) return 1.0;
+  double factor = 1.0;
+  webview_controller_->get_ZoomFactor(&factor);
+  return factor;
+}
+
+void WebView::SetZoomFactor(double zoom_factor) {
+  if (!webview_controller_ || zoom_factor <= 0) return;
+  webview_controller_->put_ZoomFactor(zoom_factor);
+}
+
+void WebView::ZoomByWheelDelta(short delta) {
+  if (!webview_controller_ || delta == 0) return;
+  double factor = 1.0;
+  if (FAILED(webview_controller_->get_ZoomFactor(&factor))) return;
+  // Match Chromium's common Ctrl+wheel step.
+  constexpr double kStep = 1.2;
+  if (delta > 0) {
+    factor *= kStep;
+  } else {
+    factor /= kStep;
+  }
+  webview_controller_->put_ZoomFactor(factor);
+}
+
+void WebView::ReportZoomFactorChanged() {
+  auto method_args = flutter::EncodableMap{
+      {flutter::EncodableValue("id"), flutter::EncodableValue(web_view_id_)},
+      {flutter::EncodableValue("zoomFactor"),
+       flutter::EncodableValue(GetZoomFactor())},
+  };
+  method_channel_->InvokeMethod(
+      "onZoomFactorChanged",
+      std::make_unique<flutter::EncodableValue>(method_args));
 }
 
 void WebView::CancelPendingNavigation() {

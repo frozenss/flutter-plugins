@@ -36,6 +36,10 @@ class WebviewImpl extends Webview {
 
   ValueChanged<bool>? _onAlwaysOnTopChanged;
 
+  ValueChanged<double>? _onZoomFactorChanged;
+
+  ValueChanged<bool>? _onLockToolbarChanged;
+
   WebviewImpl(this.viewId, this.channel);
 
   void onCloseRequested() => _onCloseRequested?.call();
@@ -49,6 +53,12 @@ class WebviewImpl extends Webview {
 
   void onAlwaysOnTopChanged(bool alwaysOnTop) =>
       _onAlwaysOnTopChanged?.call(alwaysOnTop);
+
+  void onZoomFactorChanged(double zoomFactor) =>
+      _onZoomFactorChanged?.call(zoomFactor);
+
+  void onLockToolbarChanged(bool locked) =>
+      _onLockToolbarChanged?.call(locked);
 
   @override
   void setOnCloseRequestedCallback(VoidCallback? callback) {
@@ -67,10 +77,44 @@ class WebviewImpl extends Webview {
   }
 
   @override
+  void setOnZoomFactorChangedCallback(ValueChanged<double>? callback) {
+    _onZoomFactorChanged = callback;
+  }
+
+  @override
+  void setOnLockToolbarChangedCallback(ValueChanged<bool>? callback) {
+    _onLockToolbarChanged = callback;
+  }
+
+  @override
   Future<void> setAlwaysOnTop(bool alwaysOnTop) {
     return channel.invokeMethod("setAlwaysOnTop", {
       "viewId": viewId,
       "value": alwaysOnTop,
+    });
+  }
+
+  @override
+  Future<double> getZoomFactor() async {
+    final value = await channel.invokeMethod<num>("getZoomFactor", {
+      "viewId": viewId,
+    });
+    return value?.toDouble() ?? 1.0;
+  }
+
+  @override
+  Future<void> setZoomFactor(double zoomFactor) {
+    return channel.invokeMethod("setZoomFactor", {
+      "viewId": viewId,
+      "value": zoomFactor,
+    });
+  }
+
+  @override
+  Future<void> setLockToolbarLocked(bool locked) {
+    return channel.invokeMethod("setLockToolbarLocked", {
+      "viewId": viewId,
+      "value": locked,
     });
   }
 

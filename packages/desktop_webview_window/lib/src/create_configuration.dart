@@ -58,6 +58,25 @@ class CreateConfiguration {
   /// rect that is completely off-screen is pulled back into view by Windows.
   final WebviewWindowPlacement? windowPlacement;
 
+  /// Windows only. Enable WebView2 page zoom (Ctrl+wheel, Ctrl+＋/－/0).
+  /// Default off. See [Webview.getZoomFactor], [Webview.setZoomFactor],
+  /// [Webview.setOnZoomFactorChangedCallback].
+  final bool enableZoomControl;
+
+  /// Windows only. Initial [Webview] zoom factor when [enableZoomControl] is
+  /// true. Omit (null) to leave WebView2 at its default (1.0).
+  final double? initialZoomFactor;
+
+  /// Windows only. Show a short native strip under the system title bar with
+  /// one lock toggle. Default off. The plugin does not read or write page
+  /// scroll. See [Webview.setLockToolbarLocked],
+  /// [Webview.setOnLockToolbarChangedCallback].
+  final bool showLockToolbar;
+
+  /// Windows only. Initial on/off of the lock toggle when [showLockToolbar]
+  /// is true. Default off.
+  final bool lockToolbarInitiallyLocked;
+
   const CreateConfiguration({
     this.windowWidth = 1280,
     this.windowHeight = 720,
@@ -76,6 +95,10 @@ class CreateConfiguration {
     this.alwaysOnTop = false,
     this.alwaysOnTopSystemMenuLabel,
     this.windowPlacement,
+    this.enableZoomControl = false,
+    this.initialZoomFactor,
+    this.showLockToolbar = false,
+    this.lockToolbarInitiallyLocked = false,
   });
 
   factory CreateConfiguration.platform() {
@@ -104,6 +127,12 @@ class CreateConfiguration {
           "alwaysOnTopSystemMenuLabel": alwaysOnTopSystemMenuLabel,
         if (windowPlacement != null)
           "windowPlacement": windowPlacement!.toMap(),
+        // Opt-in only: omit when false/null so older callers and default
+        // creates stay bit-identical to the previous patch line.
+        if (enableZoomControl) "enableZoomControl": true,
+        if (initialZoomFactor != null) "initialZoomFactor": initialZoomFactor,
+        if (showLockToolbar) "showLockToolbar": true,
+        if (lockToolbarInitiallyLocked) "lockToolbarInitiallyLocked": true,
       };
 }
 
