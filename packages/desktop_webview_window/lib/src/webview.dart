@@ -108,12 +108,14 @@ abstract class Webview {
   /// window's system menu, after the items added before it (e.g. the
   /// [CreateConfiguration.alwaysOnTopSystemMenuLabel] item); calling it again
   /// changes the label in place, and null (or an empty label) removes the
-  /// item. The menu has no such item until this is called. See
+  /// item. With [CreateConfiguration.showLockToolbar], a push button with the
+  /// same label is shown right of the lock toggle and hidden together with
+  /// the item. Neither exists until this is called. See
   /// [setOnSystemMenuCommandItemSelectedCallback].
   Future<void> setSystemMenuCommandItem(String? label);
 
   /// Windows only, with [setSystemMenuCommandItem]: the user selected the
-  /// item.
+  /// item or clicked its lock toolbar button.
   void setOnSystemMenuCommandItemSelectedCallback(VoidCallback? callback);
 
   /// Move and Resize the webview window

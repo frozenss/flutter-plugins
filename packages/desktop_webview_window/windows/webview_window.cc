@@ -34,6 +34,16 @@ constexpr UINT kSystemMenuCommandItemSysCommand = 0x0020;
 // Child control id for the lock toggle on the native strip.
 constexpr int kLockButtonId = 1001;
 
+// Child control id for the command button right of the lock toggle.
+constexpr int kCommandButtonId = 1002;
+
+// Logical layout of the lock strip controls.
+constexpr int kLockButtonLogicalWidth = 72;
+constexpr int kStripLogicalPad = 6;
+constexpr int kCommandButtonLogicalMinWidth = 72;
+constexpr int kCommandButtonLogicalTextPad = 12;
+constexpr int kCommandButtonLogicalInset = 2;
+
 // Logical height of the lock strip under the title bar.
 constexpr int kLockToolbarLogicalHeight = 28;
 
@@ -313,6 +323,67 @@ void WebviewWindow::SetSystemMenuCommandItem(const std::wstring &label) {
                label.c_str());
   }
   system_menu_command_label_ = label;
+  UpdateCommandButton();
+}
+
+void WebviewWindow::UpdateCommandButton() {
+  if (!lock_toolbar_) return;
+  if (system_menu_command_label_.empty()) {
+    if (command_button_) ShowWindow(command_button_.get(), SW_HIDE);
+    return;
+  }
+  if (!command_button_) {
+    command_button_ = wil::unique_hwnd(::CreateWindowEx(
+        0, L"BUTTON", L"", WS_CHILD | BS_PUSHBUTTON, 0, 0, 0, 0, hwnd_.get(),
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kCommandButtonId)),
+        GetModuleHandle(nullptr), nullptr));
+    if (!command_button_) return;
+    SendMessage(command_button_.get(), WM_SETFONT,
+                reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),
+                TRUE);
+  }
+  SetWindowText(command_button_.get(), system_menu_command_label_.c_str());
+  LayoutCommandButton(LayoutScaleFactor());
+  ShowWindow(command_button_.get(), SW_SHOWNA);
+}
+
+void WebviewWindow::LayoutCommandButton(double scale_factor) {
+  if (!command_button_) return;
+  const int title_bar_height = Scale(title_bar_height_, scale_factor);
+  const int toolbar_height = Scale(kLockToolbarLogicalHeight, scale_factor);
+  const int pad = Scale(kStripLogicalPad, scale_factor);
+  const int inset = Scale(kCommandButtonLogicalInset, scale_factor);
+  const int left = pad + Scale(kLockButtonLogicalWidth, scale_factor) + pad;
+  MoveWindow(command_button_.get(), left, title_bar_height + inset,
+             CommandButtonWidth(scale_factor), toolbar_height - 2 * inset,
+             true);
+}
+
+double WebviewWindow::LayoutScaleFactor() const {
+  // Same DPI source as WM_SIZE, so a relabel lays out like a resize.
+  RECT rect;
+  GetClientRect(hwnd_.get(), &rect);
+  HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
+  return FlutterDesktopGetDpiForMonitor(monitor) / 96.0;
+}
+
+int WebviewWindow::CommandButtonWidth(double scale_factor) const {
+  int text_width = 0;
+  HDC dc = GetDC(command_button_.get());
+  if (dc) {
+    HGDIOBJ old_font = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
+    SIZE size{};
+    if (GetTextExtentPoint32(dc, system_menu_command_label_.c_str(),
+                             static_cast<int>(system_menu_command_label_.size()),
+                             &size)) {
+      text_width = size.cx;
+    }
+    SelectObject(dc, old_font);
+    ReleaseDC(command_button_.get(), dc);
+  }
+  return (std::max)(Scale(kCommandButtonLogicalMinWidth, scale_factor),
+                    text_width +
+                        2 * Scale(kCommandButtonLogicalTextPad, scale_factor));
 }
 
 int WebviewWindow::ContentTop(double scale_factor) const {
@@ -332,11 +403,12 @@ void WebviewWindow::CreateLockToolbar(int client_width, double scale_factor) {
       GetModuleHandle(nullptr), nullptr));
   // Short strip with one lock toggle; label is the control itself.
   // Label is U+9501; keep this source ASCII-only for MSVC code-page builds.
-  const int pad = Scale(6, scale_factor);
+  const int pad = Scale(kStripLogicalPad, scale_factor);
   lock_button_ = wil::unique_hwnd(::CreateWindowEx(
       0, L"BUTTON", L"\x9501",
       WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_LEFT | BS_VCENTER,
-      pad, title_bar_height, Scale(72, scale_factor), toolbar_height, hwnd_.get(),
+      pad, title_bar_height, Scale(kLockButtonLogicalWidth, scale_factor),
+      toolbar_height, hwnd_.get(),
       reinterpret_cast<HMENU>(static_cast<INT_PTR>(kLockButtonId)),
       GetModuleHandle(nullptr), nullptr));
   if (lock_button_) {
@@ -375,16 +447,26 @@ void WebviewWindow::LayoutChildren(const RECT &client_rect,
   }
   if (lock_button_) {
     const int toolbar_height = Scale(kLockToolbarLogicalHeight, scale_factor);
-    const int pad = Scale(6, scale_factor);
-    MoveWindow(lock_button_.get(), pad, title_bar_height, Scale(72, scale_factor),
-               toolbar_height, true);
+    const int pad = Scale(kStripLogicalPad, scale_factor);
+    MoveWindow(lock_button_.get(), pad, title_bar_height,
+               Scale(kLockButtonLogicalWidth, scale_factor), toolbar_height,
+               true);
   }
+  LayoutCommandButton(scale_factor);
 
   if (web_view_ != nullptr) {
     MoveWindow(web_view_->NativeWindow().get(), 0, content_top, width,
                height - content_top, true);
     web_view_->UpdateBounds();
   }
+}
+
+void WebviewWindow::ReportSystemMenuCommandItemSelected() {
+  auto args = flutter::EncodableMap{
+      {flutter::EncodableValue("id"), flutter::EncodableValue(window_id_)}};
+  method_channel_->InvokeMethod(
+      "onSystemMenuCommandItemSelected",
+      std::make_unique<flutter::EncodableValue>(args));
 }
 
 void WebviewWindow::ReportLockToolbarChanged() {
@@ -518,6 +600,7 @@ WebviewWindow::MessageHandler(
   switch (message) {
     case WM_DESTROY: {
       flutter_action_bar_.reset();
+      command_button_.reset();
       lock_button_.reset();
       lock_toolbar_.reset();
       web_view_.reset();
@@ -566,7 +649,8 @@ WebviewWindow::MessageHandler(
           ScreenToClient(hwnd, &pt);
           HWND child = ChildWindowFromPointEx(hwnd, pt, CWP_SKIPINVISIBLE);
           if (child != nullptr &&
-              (child == lock_button_.get() || child == lock_toolbar_.get())) {
+              (child == lock_button_.get() || child == lock_toolbar_.get() ||
+               (command_button_ && child == command_button_.get()))) {
             return MA_NOACTIVATE;
           }
         }
@@ -581,6 +665,12 @@ WebviewWindow::MessageHandler(
             SendMessage(lock_button_.get(), BM_GETCHECK, 0, 0) == BST_CHECKED;
         lock_toolbar_locked_ = locked;
         ReportLockToolbarChanged();
+        return 0;
+      }
+      if (LOWORD(wparam) == kCommandButtonId &&
+          HIWORD(wparam) == BN_CLICKED &&
+          !system_menu_command_label_.empty()) {
+        ReportSystemMenuCommandItemSelected();
         return 0;
       }
       break;
@@ -613,11 +703,7 @@ WebviewWindow::MessageHandler(
       }
       if ((wparam & 0xFFF0) == kSystemMenuCommandItemSysCommand &&
           !system_menu_command_label_.empty()) {
-        auto args = flutter::EncodableMap{
-            {flutter::EncodableValue("id"), flutter::EncodableValue(window_id_)}};
-        method_channel_->InvokeMethod(
-            "onSystemMenuCommandItemSelected",
-            std::make_unique<flutter::EncodableValue>(args));
+        ReportSystemMenuCommandItemSelected();
         return 0;
       }
       break;
@@ -635,10 +721,7 @@ WebviewWindow::MessageHandler(
     case WM_SIZE: {
       RECT rect;
       GetClientRect(hwnd, &rect);
-      HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
-      UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
-      double scale_factor = dpi / 96.0;
-      LayoutChildren(rect, scale_factor);
+      LayoutChildren(rect, LayoutScaleFactor());
       return 0;
     }
     case WM_FONTCHANGE: {

@@ -86,9 +86,10 @@ class WebviewWindow {
 
   // Shows a plain (not checkable) system menu item with |label| after the
   // items added before it, relabels it in place when already shown, and
-  // removes it when |label| is empty. Selecting it reports
-  // "onSystemMenuCommandItemSelected". The menu has no such item until this
-  // is called.
+  // removes it when |label| is empty. With the lock toolbar, a push button
+  // with the same label is shown right of the lock toggle and hidden
+  // together with the item. Selecting either reports
+  // "onSystemMenuCommandItemSelected". Neither exists until this is called.
   void SetSystemMenuCommandItem(const std::wstring &label);
 
   [[nodiscard]] flutter::EncodableMap GetWindowPlacementMap() const;
@@ -139,6 +140,10 @@ class WebviewWindow {
 
   wil::unique_hwnd lock_button_;
 
+  // Push button on the lock strip mirroring the system menu command item;
+  // created on first show, hidden (not destroyed) when the item is removed.
+  wil::unique_hwnd command_button_;
+
   int last_title_bar_width_ = 0;
 
   bool destroyed_ = false;
@@ -174,6 +179,21 @@ class WebviewWindow {
   void ReportPlacement(const char *reason);
 
   void ReportLockToolbarChanged();
+
+  void ReportSystemMenuCommandItemSelected();
+
+  // Creates, relabels, shows or hides |command_button_| to match
+  // |system_menu_command_label_|; no-op without the lock toolbar.
+  void UpdateCommandButton();
+
+  // Label width in DEFAULT_GUI_FONT plus padding, at least the minimum width.
+  int CommandButtonWidth(double scale_factor) const;
+
+  // Places |command_button_| right of the lock toggle on the strip.
+  void LayoutCommandButton(double scale_factor);
+
+  // Scale factor used for laying out child controls (as on WM_SIZE).
+  double LayoutScaleFactor() const;
 
   void RegisterZoomMouseHook();
 
