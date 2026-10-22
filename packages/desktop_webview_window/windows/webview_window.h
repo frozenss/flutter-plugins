@@ -84,6 +84,13 @@ class WebviewWindow {
 
   void SetLockToolbarLocked(bool locked);
 
+  // Shows a plain (not checkable) system menu item with |label| after the
+  // items added before it, relabels it in place when already shown, and
+  // removes it when |label| is empty. Selecting it reports
+  // "onSystemMenuCommandItemSelected". The menu has no such item until this
+  // is called.
+  void SetSystemMenuCommandItem(const std::wstring &label);
+
   [[nodiscard]] flutter::EncodableMap GetWindowPlacementMap() const;
 
 
@@ -143,6 +150,12 @@ class WebviewWindow {
   bool always_on_top_ = false;
 
   bool lock_toolbar_locked_ = false;
+
+  // Label of the shown system menu command item; empty = not in the menu.
+  std::wstring system_menu_command_label_;
+
+  // The separator before the plugin's own system menu items is added once.
+  bool system_menu_separator_added_ = false;
 
   // Set while CreateAndShow applies a saved placement, so the WM_DPICHANGED
   // it may trigger does not rescale a rect that is already in target pixels.

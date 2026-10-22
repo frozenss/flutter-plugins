@@ -29,6 +29,7 @@ int Scale(int source, double scale_factor) {
 
 // System menu command ids must be below 0xF000 with the low four bits clear.
 constexpr UINT kAlwaysOnTopSysCommand = 0x0010;
+constexpr UINT kSystemMenuCommandItemSysCommand = 0x0020;
 
 // Child control id for the lock toggle on the native strip.
 constexpr int kLockButtonId = 1001;
@@ -287,8 +288,31 @@ void WebviewWindow::InstallAlwaysOnTopMenuItem() {
   HMENU menu = GetSystemMenu(hwnd_.get(), FALSE);
   if (!menu) return;
   AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+  system_menu_separator_added_ = true;
   AppendMenu(menu, MF_STRING | (always_on_top_ ? MF_CHECKED : MF_UNCHECKED),
              kAlwaysOnTopSysCommand, options_.always_on_top_menu_label.c_str());
+}
+
+void WebviewWindow::SetSystemMenuCommandItem(const std::wstring &label) {
+  HMENU menu = GetSystemMenu(hwnd_.get(), FALSE);
+  if (!menu) return;
+  const bool shown = !system_menu_command_label_.empty();
+  if (label.empty()) {
+    if (shown) {
+      DeleteMenu(menu, kSystemMenuCommandItemSysCommand, MF_BYCOMMAND);
+    }
+  } else if (shown) {
+    ModifyMenu(menu, kSystemMenuCommandItemSysCommand, MF_BYCOMMAND | MF_STRING,
+               kSystemMenuCommandItemSysCommand, label.c_str());
+  } else {
+    if (!system_menu_separator_added_) {
+      AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+      system_menu_separator_added_ = true;
+    }
+    AppendMenu(menu, MF_STRING, kSystemMenuCommandItemSysCommand,
+               label.c_str());
+  }
+  system_menu_command_label_ = label;
 }
 
 int WebviewWindow::ContentTop(double scale_factor) const {
@@ -584,6 +608,15 @@ WebviewWindow::MessageHandler(
              flutter::EncodableValue(always_on_top_)}};
         method_channel_->InvokeMethod(
             "onAlwaysOnTopChanged",
+            std::make_unique<flutter::EncodableValue>(args));
+        return 0;
+      }
+      if ((wparam & 0xFFF0) == kSystemMenuCommandItemSysCommand &&
+          !system_menu_command_label_.empty()) {
+        auto args = flutter::EncodableMap{
+            {flutter::EncodableValue("id"), flutter::EncodableValue(window_id_)}};
+        method_channel_->InvokeMethod(
+            "onSystemMenuCommandItemSelected",
             std::make_unique<flutter::EncodableValue>(args));
         return 0;
       }

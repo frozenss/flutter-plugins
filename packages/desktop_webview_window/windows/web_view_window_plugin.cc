@@ -299,6 +299,25 @@ void WebviewWindowPlugin::HandleMethodCall(
       window->SetLockToolbarLocked(value);
     }
     result->Success();
+  } else if (method_call.method_name() == "setSystemMenuCommandItem") {
+    auto *arguments =
+        std::get_if<flutter::EncodableMap>(method_call.arguments());
+    auto window_id =
+        arguments->at(flutter::EncodableValue("viewId")).LongValue();
+    if (!windows_.count(window_id)) {
+      result->Error("0", "can not find webview window for id");
+      return;
+    }
+    // Absent label removes the item.
+    std::wstring label;
+    auto label_it = arguments->find(flutter::EncodableValue("label"));
+    if (label_it != arguments->end()) {
+      if (auto *value = std::get_if<std::string>(&label_it->second)) {
+        label = utf8_to_wide(*value);
+      }
+    }
+    windows_[window_id]->SetSystemMenuCommandItem(label);
+    result->Success();
   } else if (method_call.method_name() == "getZoomFactor" ||
              method_call.method_name() == "setZoomFactor") {
     auto *arguments =

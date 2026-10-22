@@ -136,6 +136,9 @@ class WebviewWindow {
       case "onLockToolbarChanged":
         webview.onLockToolbarChanged(args['locked'] as bool);
         break;
+      case "onSystemMenuCommandItemSelected":
+        webview.onSystemMenuCommandItemSelected();
+        break;
       case "onJavaScriptMessage":
         webview.onJavaScriptMessage(args['name'], args['body']);
         break;

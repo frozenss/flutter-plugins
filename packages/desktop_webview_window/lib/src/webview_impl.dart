@@ -40,6 +40,8 @@ class WebviewImpl extends Webview {
 
   ValueChanged<bool>? _onLockToolbarChanged;
 
+  VoidCallback? _onSystemMenuCommandItemSelected;
+
   WebviewImpl(this.viewId, this.channel);
 
   void onCloseRequested() => _onCloseRequested?.call();
@@ -59,6 +61,9 @@ class WebviewImpl extends Webview {
 
   void onLockToolbarChanged(bool locked) =>
       _onLockToolbarChanged?.call(locked);
+
+  void onSystemMenuCommandItemSelected() =>
+      _onSystemMenuCommandItemSelected?.call();
 
   @override
   void setOnCloseRequestedCallback(VoidCallback? callback) {
@@ -84,6 +89,19 @@ class WebviewImpl extends Webview {
   @override
   void setOnLockToolbarChangedCallback(ValueChanged<bool>? callback) {
     _onLockToolbarChanged = callback;
+  }
+
+  @override
+  void setOnSystemMenuCommandItemSelectedCallback(VoidCallback? callback) {
+    _onSystemMenuCommandItemSelected = callback;
+  }
+
+  @override
+  Future<void> setSystemMenuCommandItem(String? label) {
+    return channel.invokeMethod("setSystemMenuCommandItem", {
+      "viewId": viewId,
+      if (label != null) "label": label,
+    });
   }
 
   @override

@@ -1,5 +1,6 @@
 ## Unreleased
 
+* Windows: opt-in system menu command item (`setSystemMenuCommandItem` shows, relabels or removes a plain item after the always-on-top item; `setOnSystemMenuCommandItemSelectedCallback`). No item until called.
 * Windows: opt-in page zoom (`enableZoomControl`, `initialZoomFactor`, `getZoomFactor` / `setZoomFactor`, `setOnZoomFactorChangedCallback`; Ctrl+wheel also works while the pointer is over the window and another window has focus) and opt-in native lock toolbar (`showLockToolbar`, `lockToolbarInitiallyLocked`, `setLockToolbarLocked`, `setOnLockToolbarChangedCallback`). Both default off. The lock toolbar does not read or write page scroll.
 * Windows: opt-in `hideOnClose` (X hides instead of destroying, `setOnCloseRequestedCallback`), `reportWindowPlacement` (`setOnWindowPlacementChangedCallback` on move/resize end and X), `windowPlacement` restore with DPI correction, `alwaysOnTop` / `setAlwaysOnTop` and a checkable `alwaysOnTopSystemMenuLabel` system menu item (`setOnAlwaysOnTopChangedCallback`), `setWebviewWindowVisibility(activate: false)`, `setMemoryUsageTargetLow` and `getWindowPlacement`.
 

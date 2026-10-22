@@ -104,6 +104,18 @@ abstract class Webview {
   /// toggled the lock switch.
   void setOnLockToolbarChangedCallback(ValueChanged<bool>? callback);
 
+  /// Windows only. Shows a plain (not checkable) item with [label] in the
+  /// window's system menu, after the items added before it (e.g. the
+  /// [CreateConfiguration.alwaysOnTopSystemMenuLabel] item); calling it again
+  /// changes the label in place, and null (or an empty label) removes the
+  /// item. The menu has no such item until this is called. See
+  /// [setOnSystemMenuCommandItemSelectedCallback].
+  Future<void> setSystemMenuCommandItem(String? label);
+
+  /// Windows only, with [setSystemMenuCommandItem]: the user selected the
+  /// item.
+  void setOnSystemMenuCommandItemSelectedCallback(VoidCallback? callback);
+
   /// Move and Resize the webview window
   Future<void> moveWebviewWindow(int left, int top, int width, int height);
 
